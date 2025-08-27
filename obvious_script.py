@@ -340,8 +340,14 @@ class CollisionDetector:
         return False  
 
 def clear_scene():
+    has_keyframes = any(
+    obj.animation_data and obj.animation_data.action 
+    and any(fcurve.keyframe_points for fcurve in obj.animation_data.action.fcurves)
+    for obj in bpy.data.objects
+)
+    if has_keyframes:
+        bpy.ops.anim.keyframe_clear_v3d(confirm=False)
     bpy.ops.object.select_all(action='SELECT')
-    bpy.ops.anim.keyframe_clear_v3d(confirm=False)
     bpy.ops.object.delete(use_global=False)
 
     for block in bpy.data.meshes:
@@ -827,7 +833,7 @@ def load_scene_config(yml_path='configs/config.yml'):
     return config
 
 def main():
-    config_path = 'D:/Desktop/University/Research/Intuitive_Physics/TowerTask/configs/config.yml'
+    config_path = '/ceph/home/panchang/TowerTask/configs/config.yml'
     config = load_scene_config(config_path)
     config_num_colors = {}
     for key, value in config['Scene']['num_colors'].items():

@@ -16,34 +16,34 @@ mkdir -p TowerTaskVideos
 
 # 配置文件列表
 config_files=(
-  "config_red_17.yml"
-  "config_red_18.yml"
-  "config_red_19.yml"
-  "config_red_20.yml"
-  "config_red_21.yml"
-  "config_red_22.yml"
-  "config_red_23.yml"
-  "config_red_24.yml"
-  "config_red_25.yml"
-  "config_red_26.yml"
-  "config_red_27.yml"
-  "config_red_28.yml"
-  "config_red_29.yml"
-  "config_red_30.yml"
-  "config_green_17.yml"
-  "config_green_18.yml"
-  "config_green_19.yml"
-  "config_green_20.yml"
-  "config_green_21.yml"
-  "config_green_22.yml"
-  "config_green_23.yml"
-  "config_green_24.yml"
-  "config_green_25.yml"
-  "config_green_26.yml"
-  "config_green_27.yml"
-  "config_green_28.yml"
-  "config_green_29.yml"
-  "config_green_30.yml"
+  "configs/config_red_17.yml"
+  "configs/config_red_18.yml"
+  "configs/config_red_19.yml"
+  "configs/config_red_20.yml"
+  "configs/config_red_21.yml"
+  "configs/config_red_22.yml"
+  "configs/config_red_23.yml"
+  "configs/config_red_24.yml"
+  "configs/config_red_25.yml"
+  "configs/config_red_26.yml"
+  "configs/config_red_27.yml"
+  "configs/config_red_28.yml"
+  "configs/config_red_29.yml"
+  "configs/config_red_30.yml"
+  "configs/config_green_17.yml"
+  "configs/config_green_18.yml"
+  "configs/config_green_19.yml"
+  "configs/config_green_20.yml"
+  "configs/config_green_21.yml"
+  "configs/config_green_22.yml"
+  "configs/config_green_23.yml"
+  "configs/config_green_24.yml"
+  "configs/config_green_25.yml"
+  "configs/config_green_26.yml"
+  "configs/config_green_27.yml"
+  "configs/config_green_28.yml"
+  "configs/config_green_29.yml"
+  "configs/config_green_30.yml"
 )
 
 # 处理所有配置文件
@@ -57,9 +57,10 @@ for config_file in "${config_files[@]}"; do
   fi
   
   # 从配置文件名中提取信息（可选，用于日志记录）
-  # 假设文件名格式为 config_{color}_{num_blocks}.yml
-  color=$(echo "$config_file" | cut -d'_' -f2)
-  num_blocks=$(echo "$config_file" | cut -d'_' -f3 | cut -d'.' -f1)
+  # 假设文件名格式为 configs/config_{color}_{num_blocks}.yml
+  filename=$(basename "$config_file")
+  color=$(echo "$filename" | cut -d'_' -f2)
+  num_blocks=$(echo "$filename" | cut -d'_' -f3 | cut -d'.' -f1)
   
   echo "处理 $color 颜色的 $num_blocks 个积木块场景"
   
@@ -69,7 +70,7 @@ for config_file in "${config_files[@]}"; do
   
   # 将配置文件复制到代码期望的固定位置
   # 请将下面的路径替换为您代码中使用的实际路径
-  fixed_config_path="/path/to/your/fixed/config.yml"  # 请替换为实际路径
+  fixed_config_path="/ceph/home/panchang/TowerTask/configs/config.yml"  # 请替换为实际路径
   cp "$config_file" "$fixed_config_path"
   
   # 运行Blender渲染任务
