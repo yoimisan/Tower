@@ -345,28 +345,31 @@ def clear_scene():
     bpy.ops.object.delete(use_global=False)
 
     for block in bpy.data.meshes:
-        if block.users == 0:
-            bpy.data.meshes.remove(block)
+        bpy.data.meshes.remove(block)
 
     for block in bpy.data.materials:
-        if block.users == 0:
-            bpy.data.materials.remove(block)
+        bpy.data.materials.remove(block)
 
     for block in bpy.data.images:
-        if block.users == 0:
-            bpy.data.images.remove(block)
+        bpy.data.images.remove(block)
     
     for block in bpy.data.cameras:
-        if block.users == 0:
-            bpy.data.cameras.remove(block)
+        bpy.data.cameras.remove(block)
     
     for block in bpy.data.lights:
-        if block.users == 0:
-            bpy.data.lights.remove(block)
+        bpy.data.lights.remove(block)
+    
+    for block in bpy.data.actions:
+        bpy.data.actions.remove(block)
 
     bpy.ops.ptcache.free_bake_all()
+    if bpy.context.scene.rigidbody_world is not None:
+        bpy.ops.rigidbody.world_remove()
 
-def setup_camera(cam_loc=(0, -20, 2), cam_rot=(1.5, 0, 0), video_len=6, fps=30):
+    import gc
+    gc.collect()
+
+def setup_camera(cam_loc=(0, -20, 2), cam_rot=(1.5, 0, 0)):
     """
         Set up the camera.
         Args:
@@ -381,16 +384,16 @@ def setup_camera(cam_loc=(0, -20, 2), cam_rot=(1.5, 0, 0), video_len=6, fps=30):
     cam_obj.location = cam_loc
     cam_obj.rotation_euler = cam_rot
     bpy.context.scene.camera = cam_obj
-    create_camera_animation(cam_obj, video_len=video_len, fps=fps)
+    create_camera_animation(cam_obj)
 
-def create_camera_animation(camera, target_loc=(0, 0, 2.5), video_len=6, fps=30):
+def create_camera_animation(camera, target_loc=(0, 0, 2.5)):
     bpy.ops.object.empty_add(type='PLAIN_AXES', location=target_loc)
     empty = bpy.context.object
     empty.name = "CameraTarget"
 
     camera.parent = empty
 
-    total_frames = video_len * fps
+    total_frames = VIDEO_LEN * FPS
     bpy.context.scene.frame_end = total_frames
 
     for frame in [1, total_frames]:
@@ -577,7 +580,7 @@ def generate_a_block(block_data):
     create_material(obj, color, mat_name)
     bpy.context.scene.collection.objects.link(obj)
 
-    set_block_physics(obj)
+    #set_block_physics(obj)
 
 def create_mesh(mesh_type, block_data=None):
     """
@@ -606,6 +609,7 @@ def setup_render(resolution_x=800, resolution_y=800, samples=128):
     bpy.context.scene.cycles.samples = samples
 
     cycles = bpy.context.scene.cycles
+    cycles.device = 'GPU'
     cycles.max_bounces = 0
     cycles.diffuse_bounces = 0
     cycles.glossy_bounces = 0
@@ -661,7 +665,10 @@ def generate_blocks_data(config, heightmap, collisiondetector, red_or_green):
     """
     blocks_data = []
     num_blocks = config['Scene']['num_blocks']#29
-    color_dic = config['Scene']['num_colors']#{"yellow": 13, "blue": 14, "white": 2}#7,9,1
+    ori_color_dic = config['Scene']['num_colors']#{"yellow": 13, "blue": 14, "white": 2}#7,9,1
+    color_dic = {}
+    for key, value in ori_color_dic.items():
+        color_dic[key] = value
     ori_size_dic = config['Scene']['sizes']#{(0.5, 0.5, 1.5): 16, (1.5, 0.5, 0.5): 13}#8,9
     size_dic = {}
     for key, value in ori_size_dic.items():
@@ -721,7 +728,11 @@ def set_block_physics(obj):
     obj.rigid_body.type = 'ACTIVE'
 
 def no_physics_render(index, config_num_colors):
-    bpy.context.scene.render.filepath = f"D:/Desktop/University/Research/Intuitive_Physics/TowerTask/{index}_{config_num_colors['yellow']}_{config_num_colors['blue']}_{config_num_colors['white']}.mp4"
+    #num_blocks = config_num_colors['yellow'] + config_num_colors['blue'] + config_num_colors['white']
+    #for i in range(num_blocks):
+        #obj = bpy.data.objects[f'block_{i}']
+        #obj.rigid_body.type = 'PASSIVE'
+    bpy.context.scene.render.filepath = OUTPUT_PATH + f"/{index}_{config_num_colors['yellow']}_{config_num_colors['blue']}_{config_num_colors['white']}.mp4"
     bpy.ops.render.render(animation=True, write_still=True)
 
 def physics_render(index, ped_num, config):
@@ -731,13 +742,19 @@ def physics_render(index, ped_num, config):
     if bpy.context.scene.rigidbody_world is None:
         raise ValueError("No rigidbody_world!")
     
+    num_blocks = config['Scene']['num_blocks']
+    for i in range(num_blocks):
+        obj = bpy.data.objects[f'block_{i}']
+        bpy.context.view_layer.objects.active = obj
+        bpy.ops.rigidbody.object_add()
+        obj.rigid_body.type = 'ACTIVE'
+
     rigidbody_world = bpy.context.scene.rigidbody_world
     rigidbody_world.point_cache.frame_start = 1
     rigidbody_world.point_cache.frame_end = VIDEO_LEN * FPS
 
     bpy.ops.ptcache.bake_all(bake=True)
-
-    num_blocks = config['Scene']['num_blocks']
+    
     positions = []
     for i in range(num_blocks):
         obj = bpy.data.objects[f'block_{i}']
@@ -745,7 +762,7 @@ def physics_render(index, ped_num, config):
         loc = obj.matrix_world.to_translation()
         positions.append(loc)
     tilt_color = get_final_tilt_color(positions, RED_OR_GREEN, ped_num)
-    bpy.context.scene.render.filepath = f"D:/Desktop/University/Research/Intuitive_Physics/TowerTask/{index}_p_{tilt_color}.mp4"
+    bpy.context.scene.render.filepath = OUTPUT_PATH + f"/{index}_p_{tilt_color}.mp4"
     
     bpy.context.scene.frame_set(1)
     bpy.ops.render.render(animation=True, write_still=True)
@@ -783,6 +800,7 @@ def load_scene_config(yml_path='configs/config.yml'):
     global DEGREE, POINT
     global PROJECTION_X, PROJECTION_Y
     global ROT_DISCRETE
+    global OUTPUT_PATH
     
     SEED = config['General'].get("SEED", 42) 
     INTERSECTION_THRESHOLD = config['General'].get("INTERSECTION_THRESHOLD", 0.01)
@@ -802,6 +820,8 @@ def load_scene_config(yml_path='configs/config.yml'):
 
     ROT_DISCRETE = config['General'].get("ROT_DISCRETE", False)
     
+    OUTPUT_PATH = config['General'].get("OUTPUT_PATH")
+    
     random.seed(SEED)
     np.random.seed(SEED)
     return config
@@ -813,12 +833,13 @@ def main():
     for key, value in config['Scene']['num_colors'].items():
         config_num_colors[key] = value
     for i in range(NUM_SCENES):
+        clear_scene()
+        
         heightmap = Heightmap()
         collisiondetector = CollisionDetector()
         blocks_data = []
         blocks_data, ped_num = generate_blocks_data(config, heightmap, collisiondetector, RED_OR_GREEN)
         
-        clear_scene()
         setup_render()
 
         create_mesh('PLANE')
