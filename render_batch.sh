@@ -70,7 +70,7 @@ for config_file in "${config_files[@]}"; do
   
   # 将配置文件复制到代码期望的固定位置
   # 请将下面的路径替换为您代码中使用的实际路径
-  fixed_config_path="/ceph/home/panchang/TowerTask/configs/config.yml"  # 请替换为实际路径
+  fixed_config_path="/data/qingjingfan/Documents/TowerTask/configs/config.yml"  # 请替换为实际路径
   cp "$config_file" "$fixed_config_path"
   
   # 运行Blender渲染任务

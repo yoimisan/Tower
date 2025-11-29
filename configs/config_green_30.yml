@@ -11,7 +11,7 @@ General:
   PROJECTION_X: [-1, 3]
   PROJECTION_Y: [-1.5, 1.5]
   ROT_DISCRETE: False
-  OUTPUT_PATH: '/ceph/home/panchang/TowerTask/TowerTaskVideos/green/30'
+  OUTPUT_PATH: '/data/qingjingfan/Documents/TowerTask/TowerTaskVideos/green/30'
 Scene:
   num_blocks: 30
   num_colors: 

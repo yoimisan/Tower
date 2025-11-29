@@ -826,7 +826,7 @@ def load_scene_config(yml_path='configs/config.yml'):
     return config
 
 def main():
-    config_path = '/ceph/home/panchang/TowerTask/configs/config.yml'
+    config_path = '/data/qingjingfan/Documents/TowerTask/configs/config.yml'
     config = load_scene_config(config_path)
     config_num_colors = {}
     for key, value in config['Scene']['num_colors'].items():
