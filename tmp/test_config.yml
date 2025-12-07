@@ -35,17 +35,19 @@ General:
   STACK_ON_EXISTING_PROB: 0.5
 
 Scene:
-  # 场景中方块总数量（包括底座 + 上层方块）
-  num_blocks: 4
-  # 每种颜色的方块数量（总和应等于 num_blocks）
-  num_colors: 
-    yellow: 1
-    blue: 1
-    green: 1
-    red: 1
-  # 不同尺寸及其数量：键是 (x, y, z) 尺寸元组，值是该尺寸的方块个数
-  sizes: 
-    (0.5, 0.5, 0.5): 4
+  # 场景中方块总数量
+  num_blocks: 10
+  num_colors:
+    yellow: 3
+    blue: 3
+    green: 2
+    red: 2
+
+  # 多种尺寸 + 对应数量（总和要等于 num_blocks）
+  sizes:
+    (0.5, 0.5, 0.5): 4        # 小方块
+    (0.5, 0.5, 1.5): 3        # 竖直长条
+    (1.5, 0.5, 0.5): 3        # 横着的长条
   # 旋转范围：
   # - 当 ROT_DISCRETE=False 时：[min_deg, max_deg]，在区间内连续采样
   # - 当 ROT_DISCRETE=True  时：[deg1, deg2, ...]，在这些角度中离散采样

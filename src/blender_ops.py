@@ -207,6 +207,16 @@ def create_red_green_ground():
     ground.data.materials.append(mat)
     bpy.ops.object.shade_smooth()
 
+    # 根据配置中的 DEGREE 和 RED_OR_GREEN 给地面加一个倾斜角，
+    # 使其在物理世界中真的是一个斜坡，而不仅仅是“虚拟平面”。
+    tilt_rad = math.radians(settings.DEGREE)
+    if settings.RED_OR_GREEN == "green":
+        # green：法向量为 (-sinθ, 0, cosθ)，对应绕 Y 轴 -θ
+        ground.rotation_euler = (0.0, -tilt_rad, 0.0)
+    elif settings.RED_OR_GREEN == "red":
+        # red：法向量为 (sinθ, 0, cosθ)，对应绕 Y 轴 +θ
+        ground.rotation_euler = (0.0, tilt_rad, 0.0)
+
     bpy.context.view_layer.objects.active = ground
     bpy.ops.rigidbody.object_add()
     ground.rigid_body.type = "PASSIVE"
