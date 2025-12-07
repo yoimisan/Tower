@@ -18,11 +18,19 @@ ROT_DISCRETE = False
 OUTPUT_PATH = ""
 RENDER_VIDEO = True
 SAVE_LAST_FRAME_IMAGE = False
+# 是否额外渲染物理开始前的第一帧静态图
+SAVE_FIRST_FRAME_IMAGE = False
+
+# 新增：控制有多少方块优先“堆叠”在已有方块上，从而形成多层结构 / T 形结构
+# 取值范围 [0, 1]，0 表示完全不用堆叠逻辑，1 表示只用堆叠逻辑
+STACK_ON_EXISTING_PROB = 0.5
 
 
 def load_scene_config(yml_path="configs/config.yml"):
     global SEED, INTERSECTION_THRESHOLD, FATNESS, NUM_SCENES, RED_OR_GREEN, VIDEO_LEN, FPS
     global DEGREE, POINT, PROJECTION_X, PROJECTION_Y, ROT_DISCRETE, OUTPUT_PATH, RENDER_VIDEO, SAVE_LAST_FRAME_IMAGE
+    global SAVE_FIRST_FRAME_IMAGE
+    global STACK_ON_EXISTING_PROB
 
     with open(yml_path, "r") as f:
         config = yaml.safe_load(f)
@@ -48,6 +56,10 @@ def load_scene_config(yml_path="configs/config.yml"):
     OUTPUT_PATH = config["General"].get("OUTPUT_PATH")
     RENDER_VIDEO = config["General"].get("RENDER_VIDEO", True)
     SAVE_LAST_FRAME_IMAGE = config["General"].get("SAVE_LAST_FRAME_IMAGE", False)
+    SAVE_FIRST_FRAME_IMAGE = config["General"].get("SAVE_FIRST_FRAME_IMAGE", False)
+
+    # 场景多样性相关：从配置里读取堆叠概率（可选）
+    STACK_ON_EXISTING_PROB = config["General"].get("STACK_ON_EXISTING_PROB", 0.5)
 
     random.seed(SEED)
     np.random.seed(SEED)

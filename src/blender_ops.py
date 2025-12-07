@@ -391,6 +391,26 @@ def physics_render(index, ped_num, config):
     rigidbody_world.point_cache.frame_start = 1
     rigidbody_world.point_cache.frame_end = settings.VIDEO_LEN * settings.FPS
 
+    scene = bpy.context.scene
+
+    # 可选：在物理模拟前渲染第一帧静态图（初始状态）
+    if settings.SAVE_FIRST_FRAME_IMAGE:
+        render = scene.render
+        prev_filepath = render.filepath
+        prev_file_format = render.image_settings.file_format
+        prev_ffmpeg_format = getattr(render, "ffmpeg", None)
+
+        scene.frame_set(1)
+        render.image_settings.file_format = "PNG"
+        render.filepath = settings.OUTPUT_PATH + f"/{index}_f_init.png"
+        bpy.ops.render.render(animation=False, write_still=True)
+
+        # 恢复原设置
+        render.image_settings.file_format = prev_file_format
+        render.filepath = prev_filepath
+        if prev_ffmpeg_format is not None:
+            render.ffmpeg.format = prev_ffmpeg_format.format
+
     bpy.ops.ptcache.bake_all(bake=True)
 
     # 在最后一帧获取每个方块的位置，并根据其正下方地面的颜色
@@ -430,8 +450,6 @@ def physics_render(index, ped_num, config):
 
     # 在控制台打印当前场景的预测结果
     print(f"[Scene {index}] predicted tilt_color = {tilt_color}")
-
-    scene = bpy.context.scene
 
     # 如果需要保存最后一帧图像
     if settings.SAVE_LAST_FRAME_IMAGE:
