@@ -224,6 +224,21 @@ def generate_blocks_data(config, heightmap, collisiondetector, red_or_green):
         color_dic[block_data["color"]] -= 1
         size_dic[block_data["size"]] -= 1
         blocks_data.append(block_data)
+
+    # 所有方块生成完毕后，将整体在水平面内平移，使总质心尽量靠近原点 (0, 0)
+    if blocks_data:
+        xs = [b["position"][0] for b in blocks_data]
+        ys = [b["position"][1] for b in blocks_data]
+        com_x = sum(xs) / len(xs)
+        com_y = sum(ys) / len(ys)
+
+        dx = -com_x
+        dy = -com_y
+
+        for b in blocks_data:
+            x, y, z = b["position"]
+            b["position"] = (x + dx, y + dy, z)
+
     return blocks_data, ped_num
 
 
