@@ -56,16 +56,16 @@ class Heightmap:
         polygon = Polygon(corners)
         return polygon
 
-    def calculate_plane(self, degree, red_or_green, point=None):
+    def calculate_plane(self, degree, point=None):
+        """
+        根据给定倾角生成一个固定方向（朝 +x 方向抬起）的平面。
+        不再区分 red/green，只保留单一斜坡方向。
+        """
         degree = math.radians(degree)
-        if red_or_green == 'green':
-            normal = (-math.sin(degree), 0, math.cos(degree))
-            if not point:
-                point = (-1.5, 0, 2.5)
-        else:
-            normal = (math.sin(degree), 0, math.cos(degree))
-            if not point:
-                point = (1.5, 0, 2.5)
+        # 固定法向量，使平面朝 +x 方向抬起
+        normal = (-math.sin(degree), 0, math.cos(degree))
+        if not point:
+            point = (-1.5, 0, 2.5)
         
         a = normal[0]
         b = 0
@@ -74,8 +74,8 @@ class Heightmap:
         return a, b, c, d
 
 
-    def generate_points_on_plane(self, size, degree, red_or_green, n_points=20, noise_level=2):
-        a, b, c, d = self.calculate_plane(degree, red_or_green)
+    def generate_points_on_plane(self, size, degree, n_points=20, noise_level=2):
+        a, b, c, d = self.calculate_plane(degree)
 
         x = np.random.uniform(settings.PROJECTION_X[0], settings.PROJECTION_X[1], n_points)
         y = np.random.uniform(settings.PROJECTION_Y[0], settings.PROJECTION_Y[1], n_points)
@@ -111,16 +111,14 @@ class Heightmap:
         positions = [(float(x[i]), float(y[i]), float(processed_z[i])) for i in range(n_points)]
         return positions
 
-    def get_valid_positions(self, size, rotation, flag, red_or_green):
-        """Get all valid positions on the heightmap."""
+    def get_valid_positions(self, size, rotation, flag):
+        """Get all valid positions on the heightmap（不再区分 red/green 区域）。"""
         valid_counts = 0
         valid_positions = []
         while valid_counts < 80:
             if flag == 1:
-                if red_or_green == 'green':
-                    x = np.random.uniform(-1.5, 0)
-                else:
-                    x = np.random.uniform(0, 1.5)
+                # 底座方块：在原点附近的矩形区域均匀采样
+                x = np.random.uniform(-1.5, 1.5)
                 y = np.random.uniform(-0.75, 0.75)
                 z = 0.75
                 position = (x, y, z)
@@ -128,7 +126,7 @@ class Heightmap:
                 valid_positions.append(position)
                 valid_counts += 1
             else:
-                positions = self.generate_points_on_plane(size, settings.DEGREE, red_or_green)
+                positions = self.generate_points_on_plane(size, settings.DEGREE)
                 for position in positions:
                     new_polygon = self.get_polygon(position, size, rotation)
                     pos_multipoly = self.height[position[2]-size[2]/2]

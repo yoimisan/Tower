@@ -7,7 +7,6 @@ SEED = 42
 INTERSECTION_THRESHOLD = 0.01
 FATNESS = 0.5
 NUM_SCENES = 1
-RED_OR_GREEN = None
 VIDEO_LEN = 6
 FPS = 30
 DEGREE = 10
@@ -27,7 +26,7 @@ STACK_ON_EXISTING_PROB = 0.5
 
 
 def load_scene_config(yml_path="configs/config.yml"):
-    global SEED, INTERSECTION_THRESHOLD, FATNESS, NUM_SCENES, RED_OR_GREEN, VIDEO_LEN, FPS
+    global SEED, INTERSECTION_THRESHOLD, FATNESS, NUM_SCENES, VIDEO_LEN, FPS
     global DEGREE, POINT, PROJECTION_X, PROJECTION_Y, ROT_DISCRETE, OUTPUT_PATH, RENDER_VIDEO, SAVE_LAST_FRAME_IMAGE
     global SAVE_FIRST_FRAME_IMAGE
     global STACK_ON_EXISTING_PROB
@@ -40,7 +39,6 @@ def load_scene_config(yml_path="configs/config.yml"):
     FATNESS = config["General"].get("FATNESS", 0.5)
 
     NUM_SCENES = config["General"].get("NUM_SCENES", 1)
-    RED_OR_GREEN = config["General"].get("RED_OR_GREEN")
 
     VIDEO_LEN = config["General"].get("VIDEO_LEN", 6)
     FPS = config["General"].get("FPS", 30)

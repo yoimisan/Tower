@@ -38,7 +38,7 @@ def clear_scene():
     gc.collect()
 
 
-def setup_camera(cam_loc=(0, -20, 2), cam_rot=(1.5, 0, 0)):
+def setup_camera(cam_loc=(0, -8, 4), cam_rot=(math.radians(60), 0, 0)):
     """
     Set up the camera.
     Args:
@@ -106,6 +106,16 @@ def setup_light(light_type="POINT"):
         light_obj = bpy.data.objects.new(name=f"SceneLight_{i}", object_data=light_data)
         bpy.context.collection.objects.link(light_obj)
         light_obj.location = loc
+
+    # 额外添加一个位于场景上方的主光源，保证地面与墙体被清晰照亮
+    key_light_data = bpy.data.lights.new(name="SceneKeyLight", type=light_type)
+    key_light_data.energy = 600
+    key_light_data.color = (1, 1, 1)
+    key_light_obj = bpy.data.objects.new(
+        name="SceneKeyLight", object_data=key_light_data
+    )
+    bpy.context.collection.objects.link(key_light_obj)
+    key_light_obj.location = (0.0, 0.0, 10.0)
 
     bpy.context.scene.world.use_nodes = True
     env = bpy.context.scene.world.node_tree.nodes["Background"]
@@ -207,65 +217,92 @@ def create_material(obj, color, mat_name):
     bpy.context.view_layer.update()
 
 
-def create_red_green_ground():
+def create_ground():
     """
-    Create ground. Add material and physics. Set up render settings.
+    创建用于物理模拟的斜坡地面，以及可见的木质地板与围墙。
+    不再包含红/绿区域，只保留单一方向的斜坡。
     """
     bpy.ops.mesh.primitive_circle_add(
         vertices=100, radius=20, fill_type="TRIFAN", location=(0, 0, 0)
     )
     ground = bpy.context.object
-    ground.name = "RedGreenGround"
+    ground.name = "PhysicsGround"
     mesh = ground.data
 
-    vcol_layer = mesh.vertex_colors.new(name="Col")
-    for poly in mesh.polygons[: len(mesh.polygons) // 2]:
-        for i in poly.loop_indices:
-            vcol_layer.data[i].color = COLORS["red"]
-    for poly in mesh.polygons[len(mesh.polygons) // 2 :]:
-        for i in poly.loop_indices:
-            vcol_layer.data[i].color = COLORS["green"]
-
-    mat = bpy.data.materials.new(name="RedGreenMaterial")
-    mat.use_nodes = True
-    nodes = mat.node_tree.nodes
-    links = mat.node_tree.links
-
-    nodes.clear()
-
-    vcol_node = nodes.new(type="ShaderNodeVertexColor")
-    vcol_node.layer_name = "Col"
-
-    output = nodes.new(type="ShaderNodeOutputMaterial")
-    links.new(vcol_node.outputs["Color"], output.inputs["Surface"])
-
-    ground.visible_diffuse = False
-    ground.visible_glossy = False
-    ground.visible_transmission = False
-
-    cycles_obj = ground.cycles
-    cycles_obj.is_shadow_catcher = False
-    cycles_obj.diffuse_bounce = 0
-    cycles_obj.glossy_bounce = 0
-    cycles_obj.transmission_bounce = 0
-    cycles_obj.transparent_bounce = 0
-
-    ground.data.materials.append(mat)
-    bpy.ops.object.shade_smooth()
-
-    # 根据配置中的 DEGREE 和 RED_OR_GREEN 给地面加一个倾斜角，
-    # 使其在物理世界中真的是一个斜坡，而不仅仅是“虚拟平面”。
+    # 根据配置中的 DEGREE 给地面加一个倾斜角（固定朝 +x 方向抬起）。
     tilt_rad = math.radians(settings.DEGREE)
-    if settings.RED_OR_GREEN == "green":
-        # green：法向量为 (-sinθ, 0, cosθ)，对应绕 Y 轴 -θ
-        ground.rotation_euler = (0.0, -tilt_rad, 0.0)
-    elif settings.RED_OR_GREEN == "red":
-        # red：法向量为 (sinθ, 0, cosθ)，对应绕 Y 轴 +θ
-        ground.rotation_euler = (0.0, tilt_rad, 0.0)
+    ground.rotation_euler = (0.0, -tilt_rad, 0.0)
 
     bpy.context.view_layer.objects.active = ground
     bpy.ops.rigidbody.object_add()
     ground.rigid_body.type = "PASSIVE"
+
+    # 让物理地面只用于物理，不参与渲染
+    ground.hide_render = True
+    ground.hide_viewport = True
+
+    # === 可见的木质地面 ===
+    # 复制一份网格，作为真正渲染出来的木头地板
+    wood_mesh = mesh.copy()
+    wood_mesh.name = "WoodGroundMesh"
+    wood_ground = bpy.data.objects.new("WoodGround", wood_mesh)
+    bpy.context.scene.collection.objects.link(wood_ground)
+    wood_ground.location = ground.location
+    wood_ground.rotation_euler = ground.rotation_euler
+    create_material(wood_ground, "white", "wood")
+    bpy.context.view_layer.objects.active = wood_ground
+    bpy.ops.object.shade_smooth()
+
+    # === 围绕场景的石头与金属墙体 ===
+    wall_height = 4.0
+    wall_length = 20.0
+    wall_thickness = 0.5
+
+    # 前后石墙（石头材质）
+    bpy.ops.mesh.primitive_cube_add(
+        size=1.0, location=(0.0, -wall_length / 2.0, wall_height / 2.0)
+    )
+    front_wall = bpy.context.object
+    front_wall.name = "StoneWall_Front"
+    front_wall.scale = (wall_length / 2.0, wall_thickness / 2.0, wall_height / 2.0)
+    create_material(front_wall, "white", "stone")
+    bpy.context.view_layer.objects.active = front_wall
+    bpy.ops.rigidbody.object_add()
+    front_wall.rigid_body.type = "PASSIVE"
+
+    bpy.ops.mesh.primitive_cube_add(
+        size=1.0, location=(0.0, wall_length / 2.0, wall_height / 2.0)
+    )
+    back_wall = bpy.context.object
+    back_wall.name = "StoneWall_Back"
+    back_wall.scale = (wall_length / 2.0, wall_thickness / 2.0, wall_height / 2.0)
+    create_material(back_wall, "white", "stone")
+    bpy.context.view_layer.objects.active = back_wall
+    bpy.ops.rigidbody.object_add()
+    back_wall.rigid_body.type = "PASSIVE"
+
+    # 左右金属墙（金属材质）
+    bpy.ops.mesh.primitive_cube_add(
+        size=1.0, location=(-wall_length / 2.0, 0.0, wall_height / 2.0)
+    )
+    left_wall = bpy.context.object
+    left_wall.name = "MetalWall_Left"
+    left_wall.scale = (wall_thickness / 2.0, wall_length / 2.0, wall_height / 2.0)
+    create_material(left_wall, "white", "metal")
+    bpy.context.view_layer.objects.active = left_wall
+    bpy.ops.rigidbody.object_add()
+    left_wall.rigid_body.type = "PASSIVE"
+
+    bpy.ops.mesh.primitive_cube_add(
+        size=1.0, location=(wall_length / 2.0, 0.0, wall_height / 2.0)
+    )
+    right_wall = bpy.context.object
+    right_wall.name = "MetalWall_Right"
+    right_wall.scale = (wall_thickness / 2.0, wall_length / 2.0, wall_height / 2.0)
+    create_material(right_wall, "white", "metal")
+    bpy.context.view_layer.objects.active = right_wall
+    bpy.ops.rigidbody.object_add()
+    right_wall.rigid_body.type = "PASSIVE"
 
 
 def create_block_mesh(size):
@@ -320,7 +357,7 @@ def create_mesh(mesh_type, block_data=None):
         block_data: if 'BLOCK'
     """
     if mesh_type == "PLANE":
-        create_red_green_ground()
+        create_ground()
     elif mesh_type == "BLOCK":
         generate_a_block(block_data)
 
@@ -366,15 +403,15 @@ def set_block_physics(obj):
     obj.rigid_body.type = "ACTIVE"
 
 
-def get_ground_color_for_location(loc):
+def is_block_hitting_ground(loc):
     """
-    根据方块在世界坐标中的位置，射线检测到地面多边形，
-    再根据多边形索引判断其位于红区还是绿区。
-    返回 'red' / 'green' 或 None（如果没击中地面）。
+    根据方块在世界坐标中的位置，射线检测到物理地面，
+    只关心是否击中，不再区分红/绿区域。
+    返回 True / False。
     """
-    ground = bpy.data.objects.get("RedGreenGround")
+    ground = bpy.data.objects.get("PhysicsGround")
     if ground is None:
-        return None
+        return False
 
     # 使用 ground 自身的 ray_cast，避免被其他物体（塔块）挡住
     # 需要把射线转换到 ground 的局部坐标系
@@ -385,39 +422,8 @@ def get_ground_color_for_location(loc):
     origin_local = inv_mat @ origin_world
     direction_local = (inv_mat.to_3x3() @ direction_world).normalized()
 
-    success, hit_loc, hit_normal, face_index = ground.ray_cast(
-        origin_local, direction_local
-    )
-
-    if not success:
-        return None
-
-    mesh = ground.data
-    num_polys = len(mesh.polygons)
-    if num_polys == 0:
-        return None
-
-    # 直接读取该多边形上的顶点颜色，以真实地面着色为准
-    vcols = getattr(mesh, "vertex_colors", None)
-    if not vcols or "Col" not in vcols:
-        return None
-
-    vcol_layer = vcols["Col"]
-    poly = mesh.polygons[face_index]
-    if not poly.loop_indices:
-        return None
-
-    # 该多边形所有 loop 的颜色应该一致，这里取第一个即可
-    loop_index = poly.loop_indices[0]
-    col = vcol_layer.data[loop_index].color  # (r, g, b, a)
-    r, g = col[0], col[1]
-
-    if r > g:
-        return "red"
-    elif g > r:
-        return "green"
-    else:
-        return None
+    success, _, _, _ = ground.ray_cast(origin_local, direction_local)
+    return bool(success)
 
 
 def no_physics_render(index, config_num_colors):
@@ -469,9 +475,9 @@ def physics_render(index, ped_num, config):
 
     bpy.ops.ptcache.bake_all(bake=True)
 
-    # 在最后一帧获取每个方块的位置，并根据其正下方地面的颜色
-    # 判断属于 red 区还是 green 区（忽略前 ped_num 个底座方块）。
-    colors = []
+    # 在最后一帧获取每个方块的位置，统计有多少非底座方块最终“砸到地面”。
+    # 不再区分红/绿区域，只关心是否发生了倒塌。
+    hit_count = 0
     bpy.context.scene.frame_set(settings.VIDEO_LEN * settings.FPS)
 
     for i in range(num_blocks):
@@ -482,30 +488,21 @@ def physics_render(index, ped_num, config):
         if i < ped_num:
             continue
 
-        c = get_ground_color_for_location(loc)
-        if c is not None:
-            colors.append(c)
+        if is_block_hitting_ground(loc):
+            hit_count += 1
 
-    if not colors:
-        # 一个方块都没打到地面：使用特殊标签 'none'
-        tilt_color = "none"
+    # colors 非空表示至少有一个非底座方块最终击中了地面，
+    # 将其视为“塔发生了倒塌”；否则认为“未倒塌”。
+    if hit_count == 0:
+        collapse_state = "stable"  # 未倒塌
     else:
-        num_green = sum(1 for c in colors if c == "green")
-        num_red = len(colors) - num_green
+        collapse_state = "collapsed"  # 发生倒塌
 
-        if num_green > 0 and num_red > 0:
-            # red 和 green 同时存在：使用特殊标签 'both'
-            tilt_color = "both"
-        elif num_green > 0:
-            tilt_color = "green"
-        elif num_red > 0:
-            tilt_color = "red"
-        else:
-            # 理论上不会到这里，兜底成 'none'
-            tilt_color = "none"
-
-    # 在控制台打印当前场景的预测结果
-    print(f"[Scene {index}] predicted tilt_color = {tilt_color}")
+    # 在控制台打印当前场景的二分类结果
+    print(
+        f"[Scene {index}] collapse_state = {collapse_state}, "
+        f"hit_ground_blocks = {hit_count}"
+    )
 
     # 如果需要保存最后一帧图像
     if settings.SAVE_LAST_FRAME_IMAGE:
@@ -519,7 +516,7 @@ def physics_render(index, ped_num, config):
 
         scene.frame_set(last_frame)
         render.image_settings.file_format = "PNG"
-        render.filepath = settings.OUTPUT_PATH + f"/{index}_p_{tilt_color}.png"
+        render.filepath = settings.OUTPUT_PATH + f"/{index}_p_{collapse_state}.png"
         bpy.ops.render.render(animation=False, write_still=True)
 
         # 恢复原设置
@@ -530,9 +527,9 @@ def physics_render(index, ped_num, config):
 
     # 如果配置关闭视频渲染，则只预测（以及可选地保存单帧图像）
     if not settings.RENDER_VIDEO:
-        return tilt_color
+        return collapse_state
 
     # 渲染整段视频
-    scene.render.filepath = settings.OUTPUT_PATH + f"/{index}_p_{tilt_color}.mp4"
+    scene.render.filepath = settings.OUTPUT_PATH + f"/{index}_p_{collapse_state}.mp4"
     scene.frame_set(1)
     bpy.ops.render.render(animation=True, write_still=True)

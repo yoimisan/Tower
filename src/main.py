@@ -28,7 +28,6 @@ def get_block_position(
     collisiondetector,
     new_size,
     new_rot,
-    red_or_green,
     flag=0,
 ):
     """
@@ -39,14 +38,15 @@ def get_block_position(
         collisiondetector
         size: size of the current block
         new_rot: rotation of the current block
-        red_or_green: 'red' -> negative
         flag: if it's pedestal then flag equals to 1
     """
-    valid_positions = heightmap.get_valid_positions(
-        new_size, new_rot, flag, red_or_green
-    )
+    valid_positions = heightmap.get_valid_positions(new_size, new_rot, flag)
     if not valid_positions:
         raise ValueError("No valid positions available for the block.")
+
+    # 备份一份候选位置，用于极端情况下的兜底策略（避免直接报错中断整个场景生成）
+    candidate_positions = list(valid_positions)
+
     while valid_positions:
         if np.random.uniform(0.0, 1.0) < settings.FATNESS:
             position = valid_positions[0]
@@ -58,19 +58,36 @@ def get_block_position(
         ):
             heightmap.update_heightmap(position, new_size, new_rot)
             return position
-    raise ValueError(
-        "No valid position found for the block after checking all options."
+
+    # 正常情况下不应走到这里。如果所有候选位置都与已有方块发生碰撞，
+    # 为了保证脚本不会因为极端几何配置直接失败，这里退一步：
+    # 允许一定程度的初始重叠，直接使用第一个候选位置作为兜底。
+    fallback_pos = candidate_positions[0]
+
+    # 极端情况下 heightmap 可能因为多边形重叠而再次抛出异常；
+    # 这里捕获后仅打印警告，不再让整个流程中断。
+    try:
+        heightmap.update_heightmap(fallback_pos, new_size, new_rot)
+    except ValueError as e:
+        print(
+            "[WARN] get_block_position: fallback position causes heightmap "
+            f"intersection ({e}), skip updating heightmap for this block."
+        )
+
+    print(
+        "[WARN] get_block_position: all candidates collided, "
+        "using fallback position with possible overlap."
     )
+    return fallback_pos
 
 
-def generate_blocks_data(config, heightmap, collisiondetector, red_or_green):
+def generate_blocks_data(config, heightmap, collisiondetector):
     """
     Generate blocks data.
     Args:
         config: dictionary from yaml
         heightmap
         collisiondetector
-        red_or_green: string 'red' or 'green'. If red, more x are negative.
     """
     blocks_data = []
     num_blocks = config["Scene"]["num_blocks"]  # 29
@@ -140,7 +157,6 @@ def generate_blocks_data(config, heightmap, collisiondetector, red_or_green):
                 collisiondetector,
                 pedestal_size,
                 new_rotation,
-                red_or_green,
                 1,
             )
             block_size = pedestal_size
@@ -210,7 +226,6 @@ def generate_blocks_data(config, heightmap, collisiondetector, red_or_green):
                         collisiondetector,
                         new_size,
                         new_rotation,
-                        red_or_green,
                     )
             else:
                 # 保持原有“在斜面上随机找位置”的逻辑
@@ -220,7 +235,6 @@ def generate_blocks_data(config, heightmap, collisiondetector, red_or_green):
                     collisiondetector,
                     new_size,
                     new_rotation,
-                    red_or_green,
                 )
 
             block_size = new_size
@@ -265,29 +279,6 @@ def generate_blocks_data(config, heightmap, collisiondetector, red_or_green):
     return blocks_data, ped_num
 
 
-def get_final_tilt_color(block_positions, red_or_green, ped_num):
-    """
-    Args:
-        block_positions: list, positions for all blocks after physics simulation
-    """
-    count = 0
-    for p in block_positions:
-        if red_or_green == "green":
-            if p[0] >= 0:
-                count += 1
-        else:
-            if p[0] <= 0:
-                count += 1
-    if count >= (len(block_positions) - ped_num) // 2:
-        return red_or_green
-    else:
-        print("reverse")
-        if red_or_green == "green":
-            return "red"
-        else:
-            return "green"
-
-
 def main():
     # 确保当前目录在 sys.path 中，以便 Blender 能找到模块
     dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -320,9 +311,8 @@ def main():
         heightmap = Heightmap()
         collisiondetector = CollisionDetector()
 
-        # 注意这里 settings.RED_OR_GREEN
         blocks_data, ped_num = generate_blocks_data(
-            config, heightmap, collisiondetector, settings.RED_OR_GREEN
+            config, heightmap, collisiondetector
         )
 
         setup_render()

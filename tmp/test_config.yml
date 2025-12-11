@@ -7,14 +7,13 @@ General:
   FATNESS: 0.5
   # 本次一次性要生成的场景数量
   NUM_SCENES: 10  
-  # 倾斜方向：'green' 表示往正 x 方向抬起平面，'red' 表示往负 x
-  RED_OR_GREEN: 'green'
+  # 斜坡方向现在固定为朝正 x 方向，不再需要 RED_OR_GREEN 配置
   # 导出视频时的时长（秒）
   VIDEO_LEN: 3
   # 导出视频的帧率
   FPS: 30
   # 斜面倾斜角度（单位：度）
-  DEGREE: 15
+  DEGREE: 0
   # 斜面上一点的参考坐标（一般留空即可使用默认）
   POINT:
   # 倾斜平面上 x 方向采样范围，用来随机生成候选位置

@@ -19,9 +19,6 @@
   - 在候选位置列表中，选取“第一个位置”（即最低、最稳位置）的概率 \([0,1]\)。
   - 越大塔越集中、越“胖”；越小位置更分散。
 - **NUM_SCENES**：一次性要生成的场景数量（循环调用生成与渲染）。
-- **RED_OR_GREEN**：
-  - `'green'` 或 `'red'`，决定斜坡的抬起方向以及分类标签的含义。
-  - 同时影响高度图上的理论平面、以及 Blender 中地面的旋转方向。
 - **VIDEO_LEN**：视频总时长（秒）。
 - **FPS**：视频帧率。
 - **DEGREE**：
@@ -71,9 +68,9 @@
 ## 输出文件命名约定
 
 - **视频文件**（如果 `RENDER_VIDEO=True`）：  
-  - `OUTPUT_PATH/{index}_p_{tilt_color}.mp4`  
-  - `index` 为场景编号（从 0 开始），`tilt_color` 为预测到达区域：`red` / `green` / `both` / `none`。
+  - `OUTPUT_PATH/{index}_p_{collapse_state}.mp4`  
+  - `index` 为场景编号（从 0 开始），`collapse_state` 为塔的状态：`collapsed` / `stable`。
 - **最后一帧图片**（如果 `SAVE_LAST_FRAME_IMAGE=True`）：  
-  - `OUTPUT_PATH/{index}_p_{tilt_color}.png`
+  - `OUTPUT_PATH/{index}_p_{collapse_state}.png`
 - **第一帧图片（初始塔形）**（如果 `SAVE_FIRST_FRAME_IMAGE=True`）：  
   - `OUTPUT_PATH/{index}_f_init.png`
