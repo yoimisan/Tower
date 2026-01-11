@@ -1,0 +1,36 @@
+General:
+  SEED: 55
+  INTERSECTION_THRESHOLD: 0.01
+  FATNESS: 0.2
+  NUM_SCENES: 50
+  VIDEO_LEN: 3
+  FPS: 15
+  DEGREE: 0
+  POINT: null
+  PROJECTION_X:
+  - -1.0
+  - 3.0
+  PROJECTION_Y:
+  - -1.5
+  - 1.5
+  ROT_DISCRETE: false
+  OUTPUT_PATH: D:\workspace\python-workspace\Tower\output\cubes_13
+  RENDER_VIDEO: false
+  SAVE_ALL_FRAMES_IMAGES: true
+  SAVE_LAST_FRAME_IMAGE: false
+  SAVE_FIRST_FRAME_IMAGE: false
+  STACK_ON_EXISTING_PROB: 0.5
+Scene:
+  num_blocks: 13
+  num_colors:
+    yellow: 4
+    blue: 3
+    green: 3
+    red: 3
+  sizes:
+    (0.5, 0.5, 0.5): 13
+  rot_range:
+  - 0
+  - 360
+  num_materials:
+    wood: 13

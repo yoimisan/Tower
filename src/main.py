@@ -18,6 +18,7 @@ from blender_ops import (
     setup_light,
     no_physics_render,
     physics_render,
+    simple_render,
 )
 
 

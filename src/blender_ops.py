@@ -5,7 +5,8 @@ import os
 from mathutils import Vector, Euler, Matrix
 from constants import COLORS, MATERIALS
 import settings
-
+import numpy as np
+import tempfile
 
 def clear_scene():
     bpy.ops.object.select_all(action="SELECT")
@@ -406,6 +407,45 @@ def no_physics_render(index, config_num_colors):
     # obj.rigid_body.type = 'PASSIVE'
     bpy.context.scene.render.filepath = settings.OUTPUT_PATH + f"/{index}.mp4"
     bpy.ops.render.render(animation=True, write_still=True)
+
+def simple_render(index=0, scene_dir = "./predict_cache/"):
+    # 1. 备份原有渲染设置（避免影响其他函数）
+    render = bpy.context.scene.render
+    prev_filepath = render.filepath
+    prev_file_format = render.image_settings.file_format
+    prev_ffmpeg_format = None
+    if hasattr(render, "ffmpeg"):
+        prev_ffmpeg_format = render.ffmpeg.format
+
+    # 3. 创建临时文件（自动删除，无残留）
+    temp_fd, temp_path = tempfile.mkstemp(suffix=".png")
+    os.close(temp_fd)  # 关闭文件句柄，让Blender可以写入
+
+    # try:
+        # 4. 配置渲染参数，写入临时文件
+    bpy.context.scene.frame_set(1)  # 固定渲染第1帧（初始静态状态）
+    render.image_settings.file_format = "PNG"
+    render.filepath = temp_path  # 指向临时文件路径
+
+    # 5. 执行后台渲染（必须 write_still=True，才能生成有效文件）
+    # 后台模式下 animation=False 表示单帧渲染
+    bpy.ops.render.render(animation=False, write_still=True)
+
+    # 6. 从临时文件读取数据，转换为numpy数组
+    from PIL import Image  # 需确保安装Pillow：pip install pillow
+    with Image.open(temp_path) as img:
+        img_rgb = img.convert("RGB")  # 转换为RGB，去除Alpha通道
+        pixels_rgb = np.array(img_rgb, dtype=np.uint8)
+
+
+    # finally:
+    #     # 7. 恢复原有渲染设置（确保不影响后续函数）
+    render.filepath = prev_filepath
+    render.image_settings.file_format = prev_file_format
+    if prev_ffmpeg_format is not None and hasattr(render, "ffmpeg"):
+        render.ffmpeg.format = prev_ffmpeg_format
+    
+    return pixels_rgb
 
 
 def physics_render(index, ped_num, config):

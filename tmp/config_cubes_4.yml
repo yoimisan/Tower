@@ -1,0 +1,36 @@
+General:
+  SEED: 46
+  INTERSECTION_THRESHOLD: 0.01
+  FATNESS: 0.2
+  NUM_SCENES: 50
+  VIDEO_LEN: 3
+  FPS: 15
+  DEGREE: 0
+  POINT: null
+  PROJECTION_X:
+  - -1.0
+  - 3.0
+  PROJECTION_Y:
+  - -1.5
+  - 1.5
+  ROT_DISCRETE: false
+  OUTPUT_PATH: D:\workspace\python-workspace\Tower\output\cubes_4
+  RENDER_VIDEO: false
+  SAVE_ALL_FRAMES_IMAGES: false
+  SAVE_LAST_FRAME_IMAGE: true
+  SAVE_FIRST_FRAME_IMAGE: true
+  STACK_ON_EXISTING_PROB: 0.5
+Scene:
+  num_blocks: 4
+  num_colors:
+    yellow: 1
+    blue: 1
+    green: 1
+    red: 1
+  sizes:
+    (0.5, 0.5, 0.5): 4
+  rot_range:
+  - 0
+  - 360
+  num_materials:
+    wood: 4
