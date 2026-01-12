@@ -1,4 +1,4 @@
-## 简介
+# 数据集构建
 
 使用 Blender 物理引擎生成方块塔倒塌数据集，输出：固定视角图像帧序列、塔是否倒塌标签、倒塌过程序列、以及每个方块在整个模拟过程中的三维轨迹（位置 + 姿态）。
 
@@ -44,3 +44,39 @@ python src\generate_complex_dataset.py
   - `f_init.png`（可选）：初始塔形
   - `p_collapsed.png` / `p_stable.png`（可选）：最后一帧静态图
   - `p_collapsed.mp4` / `p_stable.mp4`（可选）：整段视频
+---
+
+# 基线模型
+
+## 1. Static CNN Baseline (`cnn.py`)
+
+### 输出
+* 二分类概率：`P(collapse)`
+
+### 快速运行
+```bash
+python src/cnn.py
+```
+---
+
+## 2. CNN + Transformer Temporal Reasoning Model (`transformer.py`)
+
+
+### 输出
+
+* 二分类概率：`P(collapse)`
+* 预测视频帧序列
+
+### 训练
+
+```bash
+python src/predict_tf.py
+```
+
+### 评估
+
+```bash
+python src/eval_tf.py --model-path ./model_a.pt --data-root ./all_data --output-dir ./eval_outputs
+```
+
+---
