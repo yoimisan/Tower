@@ -80,3 +80,9 @@ python src/eval_tf.py --model-path ./model_a.pt --data-root ./all_data --output-
 ```
 
 ---
+
+## 生成 Tower
+```powershell
+blender -b main.blend -P src\{planner}_plan.py -- <config.yml>
+```
+planner有simple random mcts三种

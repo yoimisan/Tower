@@ -72,16 +72,82 @@ class CollapsePredictor:
         prob = torch.sigmoid(logit)
         pred = (prob >= 0.5).float()
         return logit.item()
+    
+
+def render_tower(blocks) -> np.ndarray:
+    """调用Blender脚本渲染塔状态，返回图像（与你的已有代码集成）"""
+    # 调用你已有的Blender渲染接口，传入node.blocks生成图像
+    # 此处为简化实现，返回模拟图像
+    clear_scene()
+
+    setup_render(resolution_x=128, resolution_y=128, samples=8)
+
+    create_mesh("PLANE")
+
+    for block in blocks:
+        create_mesh("BLOCK", block)
+
+    setup_camera()
+    setup_light()
+
+    # no_physics_render(i, config_num_colors)
+    p = simple_render()        
+    clear_scene()
+    
+    return p
 
 
 
-def get_block_position(
+# def get_block_position(
+#     existing_blocks,
+#     heightmap,
+#     collisiondetector,
+#     new_size,
+#     new_rot,
+#     flag=0,
+# ):
+#     """
+#     Generate a block's position.
+#     Args:
+#         existing_blocks: dic
+#         heightmap
+#         collisiondetector
+#         size: size of the current block
+#         new_rot: rotation of the current block
+#         flag: if it's pedestal then flag equals to 1
+#     """
+#     valid_positions = heightmap.get_valid_positions(new_size, new_rot, flag)
+#     if not valid_positions:
+#         raise ValueError("No valid positions available for the block.")
+
+#     while valid_positions:
+#         if np.random.uniform(0.0, 1.0) < settings.FATNESS:
+#             position = valid_positions[0]
+#         else:
+#             position = random.choice(valid_positions)
+#         valid_positions.remove(position)
+#         if not collisiondetector.check_block_collision(
+#             existing_blocks, position, new_size, new_rot
+#         ):
+#             heightmap.update_heightmap(position, new_size, new_rot)
+#             return position
+
+#     # 如果所有候选位置都会与已有方块发生碰撞，则认为当前几何配置不可行，
+#     # 直接报错让上层决定是否跳过该场景 / 重新采样，而不是强行允许方块重叠。
+#     raise ValueError(
+#         "All candidate positions collide with existing blocks; "
+#         "no non-overlapping placement found for this block."
+#     )
+
+
+def get_block_positions(
     existing_blocks,
     heightmap,
     collisiondetector,
     new_size,
     new_rot,
     flag=0,
+    num=3,
 ):
     """
     Generate a block's position.
@@ -93,28 +159,21 @@ def get_block_position(
         new_rot: rotation of the current block
         flag: if it's pedestal then flag equals to 1
     """
+
+    positions = []
     valid_positions = heightmap.get_valid_positions(new_size, new_rot, flag)
     if not valid_positions:
-        raise ValueError("No valid positions available for the block.")
+        return positions   
 
-    while valid_positions:
-        if np.random.uniform(0.0, 1.0) < settings.FATNESS:
-            position = valid_positions[0]
-        else:
-            position = random.choice(valid_positions)
+    while valid_positions and len(positions) < num: 
+        position = random.choice(valid_positions)
         valid_positions.remove(position)
         if not collisiondetector.check_block_collision(
             existing_blocks, position, new_size, new_rot
         ):
-            heightmap.update_heightmap(position, new_size, new_rot)
-            return position
+            positions.append(position)
 
-    # 如果所有候选位置都会与已有方块发生碰撞，则认为当前几何配置不可行，
-    # 直接报错让上层决定是否跳过该场景 / 重新采样，而不是强行允许方块重叠。
-    raise ValueError(
-        "All candidate positions collide with existing blocks; "
-        "no non-overlapping placement found for this block."
-    )
+    return positions
 
 
 def set_blocks_data(blocks_data, ped_num):
@@ -156,6 +215,8 @@ def generate_blocks_data(config, heightmap, collisiondetector):
         heightmap
         collisiondetector
     """
+    collapsepredictor = CollapsePredictor()
+
     blocks_data = []
     num_blocks = config["Scene"]["num_blocks"]  # 29
     ori_color_dic = config["Scene"][
@@ -229,6 +290,7 @@ def generate_blocks_data(config, heightmap, collisiondetector):
             "size": new_size,
             "position": (0., 0., 0.),
             "rotation": (0., 0., 0.),
+            "used": False,
         }
 
         color_dic[block_data["color"]] -= 1
@@ -243,38 +305,62 @@ def generate_blocks_data(config, heightmap, collisiondetector):
 
     for i in range(num_blocks):
         # ---------- 先生成底座 ----------
+        print(i)
         if i < ped_num:
             if settings.ROT_DISCRETE is False:
                 new_rotation = (0, 0, random.uniform(rot_range[0], rot_range[1]))
             else:
                 new_rotation = (0, 0, random.choice(rot_range))
 
-            new_position = get_block_position(
-                blocks_data,
-                heightmap,
-                collisiondetector,
-                pedestal_size,
-                new_rotation,
-                1,
-            )
-            
-        else:
-            if settings.ROT_DISCRETE is False:
-                new_rotation = (0, 0, random.uniform(rot_range[0], rot_range[1]))
-            else:
-                new_rotation = (0, 0, random.choice(rot_range))
-                
-            new_position = get_block_position(
-                blocks_data,
+            new_position = random.choice(get_block_positions(
+                [block for block in blocks if block["used"]],
                 heightmap,
                 collisiondetector,
                 blocks[i]["size"],
                 new_rotation,
-            )
-            
+                1,
+            ))
 
+        else:
+            optim = blocks[i].copy()
+            maxi = 10
+            for j in range(50):
+                if settings.ROT_DISCRETE is False:
+                    new_rotation = (0, 0, random.uniform(rot_range[0], rot_range[1]))
+                else:
+                    new_rotation = (0, 0, random.choice(rot_range))
+                    
+                new_position = random.choice(get_block_positions(
+                    blocks_data,
+                    heightmap,
+                    collisiondetector,
+                    blocks[i]["size"],
+                    new_rotation,
+                ))
+
+                blocks[i]["position"] = new_position
+                blocks[i]["rotation"] = new_rotation
+
+                temp_blocks = blocks_data.copy() + [blocks[i]]
+
+                p = render_tower(temp_blocks) 
+
+                pred = collapsepredictor.predict(p)
+
+                if  pred < maxi:
+                    maxi = pred
+                    optim["position"] = new_position
+                    optim["rotation"] = new_rotation
+            
+            new_position = optim["position"]
+            new_rotation = optim["rotation"]
+
+        heightmap.update_heightmap(new_position, blocks[i]["size"], new_rotation)
         blocks[i]["position"] = new_position
         blocks[i]["rotation"] = new_rotation
+        
+        blocks[i]["used"] = True
+        
         blocks_data.append(blocks[i])
 
     set_blocks_data(blocks_data, ped_num)
