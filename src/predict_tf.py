@@ -86,13 +86,14 @@ class TowerCollapseDataset(Dataset):
         #     if not cubes_dir.is_dir():
         #         continue
         for scene_dir in sorted(self.root_dir.iterdir()):
+            print(scene_dir)
             if not scene_dir.is_dir():
                 continue
-
+            print(2)
             meta_path = scene_dir / "meta.json"
             if not meta_path.exists():
                 continue
-
+            print(3)
             # 读取标签：collapse_state -> 0/1
             with open(meta_path, "r", encoding="utf-8") as f:
                 meta = json.load(f)
@@ -103,7 +104,7 @@ class TowerCollapseDataset(Dataset):
             # 至少需要 2 帧（1 帧做输入，剩余做预测目标）
             if len(frame_paths) < 2:
                 continue
-
+            print(4)
             raw_samples.append((frame_paths, y_c))
 
         if not raw_samples:
@@ -401,6 +402,7 @@ def eval_one_epoch(model, loader, cfg: TrainConfig):
         total_vid += F.l1_loss(pred_seq, y_seq, reduction="sum").item()
 
         prob = torch.sigmoid(logit)
+        print("logit ",logit)
         pred = (prob >= 0.5).float()
         correct += (pred == y_c).sum().item()
         n += x0.size(0)

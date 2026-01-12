@@ -11,6 +11,16 @@ import ast
 
 sys.path.append(os.path.dirname(__file__)) 
 
+
+import argparse
+from pathlib import Path
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+from torchvision.utils import make_grid, save_image
+
 import settings
 import constants
 from geometry import Heightmap, CollisionDetector
@@ -24,6 +34,44 @@ from blender_ops import (
     physics_render,
     simple_render,
 )
+
+
+from predict_tf import (
+    TrainConfig,
+    TowerCollapseDataset,
+    TemporalTransformerPredictor,
+    eval_one_epoch,
+)
+
+
+class CollapsePredictor:
+    def __init__(self, cfg = TrainConfig()):
+        self.cfg = cfg
+        self.model = TemporalTransformerPredictor(
+            image_size=cfg.image_size,
+            feat_channels=256,
+            nhead=8,
+            num_layers=6,
+            dim_feedforward=1024,
+            dropout=0.1,
+            T=22,
+        ).to(cfg.device)
+
+        path = Path(__file__).resolve().parent.parent / "model_a.pt"
+
+        state = torch.load(path, map_location=cfg.device)
+        self.model.load_state_dict(state)
+        self.model.eval()
+
+    @torch.no_grad()
+    def predict(self, x):
+        # print(x.dtype)
+        x0 =torch.from_numpy(x.transpose(2, 0, 1)).to(dtype=torch.float32).unsqueeze(dim=0) / 255.0
+        x0 = x0.to(self.cfg.device)
+        _, logit = self.model(x0)
+        prob = torch.sigmoid(logit)
+        pred = (prob >= 0.5).float()
+        return logit.item()
 
 
 
@@ -191,7 +239,7 @@ def generate_blocks_data(config, heightmap, collisiondetector):
     if num_blocks <= 1:
         ped_num = 0
     else:
-        ped_num = min(random.randint(2, 5), num_blocks - 1)
+        ped_num = min(random.randint(2, 4), num_blocks - 1)
 
     for i in range(num_blocks):
         # ---------- 先生成底座 ----------
@@ -257,30 +305,39 @@ def main():
     for key, value in config["Scene"]["num_colors"].items():
         config_num_colors[key] = value
 
-    clear_scene()
+    for i in range(5):
+        clear_scene()
 
-    heightmap = Heightmap()
-    collisiondetector = CollisionDetector()
+        heightmap = Heightmap()
+        collisiondetector = CollisionDetector()
 
-    blocks_data, ped_num = generate_blocks_data(
-        config, heightmap, collisiondetector
-    )
+        blocks_data, ped_num = generate_blocks_data(
+            config, heightmap, collisiondetector
+        )
 
-    setup_render(resolution_x=256, resolution_y=256, samples=32)
+        setup_render(resolution_x=128, resolution_y=128, samples=16)
 
-    create_mesh("PLANE")
+        create_mesh("PLANE")
 
-    for block_data in blocks_data:
-        create_mesh("BLOCK", block_data)
+        for block_data in blocks_data:
+            create_mesh("BLOCK", block_data)
 
-    setup_camera()
-    setup_light()
+        setup_camera()
+        setup_light()
 
-    # no_physics_render(i, config_num_colors)
-    physics_render(0, ped_num, config)
+        # no_physics_render(i, config_num_colors)
+        physics_render(i, ped_num, config)
 
-    p = simple_render()
-    print(p.shape)
+        p = simple_render()
+        print(p.shape)
+
+        predictor = CollapsePredictor()
+
+        clear_scene()
+
+        print("predict ",predictor.predict(p))
+
+    
 
 if __name__ == "__main__":
     main()

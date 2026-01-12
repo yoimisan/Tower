@@ -5,11 +5,21 @@ import sys
 import os
 import random
 
+sys.path.append(os.path.dirname(__file__)) 
+
 import math
 import ast
 
+import argparse
+from pathlib import Path
 
-sys.path.append(os.path.dirname(__file__)) 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+from torchvision.utils import make_grid, save_image
+
+
 
 import settings
 import constants
@@ -25,11 +35,18 @@ from blender_ops import (
     simple_render,
 )
 
+from predict_tf import (
+    TrainConfig,
+    TowerCollapseDataset,
+    TemporalTransformerPredictor,
+    eval_one_epoch,
+)
+
 # MCTS配置参数
 MCTS_CONFIG = {
-    "iterations": 10,  # 每次搭建步骤的MCTS迭代次数
+    "iterations": 50,  # 每次搭建步骤的MCTS迭代次数
     "exploration_constant": 1.414,  # UCB探索系数（平衡探索与利用）
-    "height_reward_weight": 0.1,  # 高度奖励权重（避免只追求稳定忽略高度）
+    "height_reward_weight": 0.02,  # 高度奖励权重（避免只追求稳定忽略高度）
     "collapse_penalty": 10.0,  # 高倒塌概率惩罚项
     "max_rollout_layer": 10,  # 模拟阶段最大层数
 }
@@ -44,6 +61,34 @@ MCTS_CONFIG = {
 #     material: str  # 材质（wood/metal/stone）
 #     used: bool = False  # 是否已被使用
 
+class CollapsePredictor:
+    def __init__(self, cfg = TrainConfig()):
+        self.cfg = cfg
+        self.model = TemporalTransformerPredictor(
+            image_size=cfg.image_size,
+            feat_channels=256,
+            nhead=8,
+            num_layers=6,
+            dim_feedforward=1024,
+            dropout=0.1,
+            T=22,
+        ).to(cfg.device)
+
+        path = Path(__file__).resolve().parent.parent / "model_a.pt"
+
+        state = torch.load(path, map_location=cfg.device)
+        self.model.load_state_dict(state)
+        self.model.eval()
+
+    @torch.no_grad()
+    def predict(self, x):
+        x0 =torch.from_numpy(x.transpose(2, 1, 0)).to(dtype=torch.float32).unsqueeze(dim=0)/ 255.0
+        x0 = x0.to(self.cfg.device)
+        _, logit = self.model(x0)
+        prob = torch.sigmoid(logit)
+        pred = (prob >= 0.5).float()
+        return logit.item()
+
 def get_block_positions(
     existing_blocks,
     heightmap,
@@ -51,7 +96,7 @@ def get_block_positions(
     new_size,
     new_rot,
     flag=0,
-    num=5,
+    num=3,
 ):
     """
     Generate a block's position.
@@ -148,7 +193,7 @@ class LegalActionGenerator:
         existing_blocks = [b for b in self.all_blocks if b["used"]]
         
         # # 3. 生成顶部支撑区域（当前塔顶部的所有可放置位置）
-        # top_support_regions = self._get_top_support_regions(node)
+        top_support_regions = self._get_top_support_regions(node)
         
         # 4. 为每个可用积木生成候选位置与角度
         for block in available_blocks:
@@ -173,22 +218,38 @@ class LegalActionGenerator:
                     legal_actions.append((block["index"], pos, rot))
         return legal_actions
 
-    # def _get_top_support_regions(self, node: MCTSTowerNode) -> List[Tuple]:
-    #     """获取当前塔顶部的支撑区域（返回可放置的平面区域坐标）"""
-    #     # 简化实现：提取当前塔所有顶部积木的上表面区域（与你的Heightmap类对齐）
-    #     top_regions = []
-    #     if not node.blocks:  # 空白平面（初始状态）
-    #         top_regions.append(((0.0, 0.0), (1.0, 1.0)))  # 中心区域
-    #     else:
-    #         # 找到当前塔最高的积木（顶部层）
-    #         max_z = max(b.position[2] + b.size[2]/2 for b in node.blocks)
-    #         top_blocks = [b for b in node.blocks if (b.position[2] + b.size[2]/2) == max_z]
-    #         for b in top_blocks:
-    #             # 提取积木上表面的四个角（支撑区域）
-    #             x, y, _ = b.position
-    #             l, w, _ = b.size
-    #             top_regions.append(((x-l/2, y-w/2), (x+l/2, y+w/2)))
-    #     return top_regions
+        #  # 4. 为每个可用积木生成候选位置与角度
+        # for block in available_blocks:
+        #     # 离散化旋转角度（简化动作空间，也可连续采样）
+        #     candidate_rotations = self._get_candidate_rotations()
+            
+        #     # 离散化顶部放置位置（基于支撑区域采样）
+        #     candidate_positions = self._sample_positions_on_support(top_support_regions, block)
+            
+        #     # 5. 验证每个（位置+角度）的合法性（不重叠、支撑面积达标）
+        #     for pos in candidate_positions:
+        #         for rot in candidate_rotations:
+        #             if self._is_action_legal(node, block, pos, rot, existing_blocks):
+        #                 legal_actions.append((block["index"], pos, rot))
+        
+        # return legal_actions
+
+    def _get_top_support_regions(self, node: MCTSTowerNode) -> List[Tuple]:
+        """获取当前塔顶部的支撑区域（返回可放置的平面区域坐标）"""
+        # 简化实现：提取当前塔所有顶部积木的上表面区域（与你的Heightmap类对齐）
+        top_regions = []
+        if not node.blocks:  # 空白平面（初始状态）
+            top_regions.append(((0.0, 0.0), (1.0, 1.0)))  # 中心区域
+        else:
+            # 找到当前塔最高的积木（顶部层）
+            max_z = max(b["position"][2] + b["size"][2]/2 for b in node.blocks)
+            top_blocks = [b for b in node.blocks if (b["position"][2] + b["size"][2]/2) == max_z]
+            for b in top_blocks:
+                # 提取积木上表面的四个角（支撑区域）
+                x, y, _ = b["position"]
+                l, w, _ = b["size"]
+                top_regions.append(((x-l/2, y-w/2), (x+l/2, y+w/2)))
+        return top_regions
 
     def _get_candidate_rotations(self) -> List[Tuple[float, float, float]]:
         """离散化候选旋转角度（仅绕Z轴旋转，与你的Blender代码对齐）"""
@@ -196,38 +257,38 @@ class LegalActionGenerator:
             return [(0, 0, 0), (0, 0, np.pi/2), (0, 0, np.pi), (0, 0, 3*np.pi/2)]
         else:
             # 连续空间：采样4个角度（平衡效率与探索性）
-            return [(0, 0, np.random.uniform(0, 2*np.pi)) for _ in range(4)]
+            return [(0, 0, np.random.uniform(0, 2*np.pi)) for _ in range(10)]
 
-    # def _sample_positions_on_support(self, support_regions, block) -> List[Tuple[float, float, float]]:
-    #     """在支撑区域上采样候选放置位置（保证Z轴对齐顶部）"""
-    #     candidate_positions = []
-    #     l, w, h = block.size
-    #     for (min_xy, max_xy) in support_regions:
-    #         min_x, min_y = min_xy
-    #         max_x, max_y = max_xy
-    #         # 采样5个候选位置（避免动作空间过大）
-    #         for _ in range(5):
-    #             x = np.random.uniform(min_x + l/4, max_x - l/4)
-    #             y = np.random.uniform(min_y + w/4, max_y - w/4)
-    #             z = (max_xy[0] + min_xy[0])/2  # 对齐支撑区域顶部Z轴（简化，与Blender Heightmap对齐）
-    #             candidate_positions.append((x, y, z + h/2))  # 积木中心Z坐标
-    #     return candidate_positions
+    def _sample_positions_on_support(self, support_regions, block) -> List[Tuple[float, float, float]]:
+        """在支撑区域上采样候选放置位置（保证Z轴对齐顶部）"""
+        candidate_positions = []
+        l, w, h = block["size"]
+        for (min_xy, max_xy) in support_regions:
+            min_x, min_y = min_xy
+            max_x, max_y = max_xy
+            # 采样5个候选位置（避免动作空间过大）
+            for _ in range(5):
+                x = np.random.uniform(min_x + l/4, max_x - l/4)
+                y = np.random.uniform(min_y + w/4, max_y - w/4)
+                z = (max_xy[0] + min_xy[0])/2  # 对齐支撑区域顶部Z轴（简化，与Blender Heightmap对齐）
+                candidate_positions.append((x, y, z + h/2))  # 积木中心Z坐标
+        return candidate_positions
 
-    # def _is_action_legal(self, node: MCTSTowerNode, block: Block, pos: Tuple, rot: Tuple) -> bool:
-    #     """验证动作合法性：1. 不重叠 2. 支撑面积达标（调用Blender CollisionDetector）"""
-    #     # 1. 调用CollisionDetector检查是否与已有积木重叠
-    #     collision_detector = CollisionDetector()
-    #     new_vertices = collision_detector.get_block_vertices(pos, block.size, rot)
-    #     for existing_block in node.blocks:
-    #         existing_vertices = collision_detector.get_block_vertices(
-    #             existing_block.position, existing_block.size, existing_block.rotation
-    #         )
-    #         if collision_detector.separating_axis_theorem(new_vertices, existing_vertices):
-    #             return False
+    def _is_action_legal(self, node: MCTSTowerNode, block, pos: Tuple, rot: Tuple, exsiting_blocks) -> bool:
+        """验证动作合法性：1. 不重叠 2. 支撑面积达标（调用Blender CollisionDetector）"""
+        # 1. 调用CollisionDetector检查是否与已有积木重叠
+        collision_detector = CollisionDetector()
+        new_vertices = collision_detector.get_block_vertices(pos, block["size"], rot)
+        for existing_block in exsiting_blocks:
+            existing_vertices = collision_detector.get_block_vertices(
+                existing_block["position"], existing_block["size"], existing_block["rotation"]
+            )
+            if collision_detector.separating_axis_theorem(new_vertices, existing_vertices):
+                return False
         
-    #     # 2. 检查支撑面积是否达标（与你的Heightmap.intersection_threshold对齐）
-    #     # 此处简化实现：可调用Heightmap计算多边形交集面积
-    #     return True
+        # 2. 检查支撑面积是否达标（与你的Heightmap.intersection_threshold对齐）
+        # 此处简化实现：可调用Heightmap计算多边形交集面积
+        return True
     
 
 class TowerMCTS:
@@ -322,8 +383,8 @@ class TowerMCTS:
         
         # 缓存子节点的倒塌概率与渲染图像（调用已有模型与Blender）
         child_node.render_img = self._render_tower(child_node)  # 调用Blender渲染
-        # child_node.collapse_prob = self.collapse_predictor.predict(child_node.render_img)
-        child_node.collapse_prob = 0.5
+        child_node.collapse_prob = self.collapse_predictor.predict(child_node.render_img)
+        # child_node.collapse_prob = 0.5
         
         # 关联父子节点，移除已尝试动作
         node.children[action] = child_node
@@ -396,8 +457,8 @@ class TowerMCTS:
         if node.collapse_prob is None:
             # 未预测倒塌概率，先调用模型预测
             node.render_img = self._render_tower(node)
-            # node.collapse_prob = self.collapse_predictor.predict(node.render_img)
-            node.collapse_prob = 0.5
+            node.collapse_prob = self.collapse_predictor.predict(node.render_img)
+            # node.collapse_prob = 0.5
         
         # 稳定性得分（0~1，越高越稳定）
         stability_score = 1.0 - node.collapse_prob
@@ -413,7 +474,7 @@ class TowerMCTS:
         # 此处为简化实现，返回模拟图像
         clear_scene()
 
-        setup_render(resolution_x=256, resolution_y=256, samples=32)
+        setup_render(resolution_x=128, resolution_y=128, samples=4)
 
         create_mesh("PLANE")
 
@@ -677,6 +738,8 @@ def generate_blocks_data(config):
             1,
         ))
 
+        heightmap.update_heightmap( new_position, blocks[i]["size"], new_rotation)
+
     #     else:
     #         if settings.ROT_DISCRETE is False:
     #             new_rotation = (0, 0, random.uniform(rot_range[0], rot_range[1]))
@@ -700,7 +763,7 @@ def generate_blocks_data(config):
 
     _, blocks_data = tower_building_planner(
         blocks,
-        None,
+        CollapsePredictor(),
     )
 
     set_blocks_data(blocks_data, ped_num)
@@ -730,26 +793,32 @@ def main():
     for key, value in config["Scene"]["num_colors"].items():
         config_num_colors[key] = value
 
-    clear_scene()
+    for i in range(5):
 
-    blocks_data, ped_num = generate_blocks_data(config)
+        clear_scene()
 
-    setup_render(resolution_x=256, resolution_y=256, samples=32)
+        blocks_data, ped_num = generate_blocks_data(config)
 
-    create_mesh("PLANE")
+        setup_render(resolution_x=128, resolution_y=128, samples=16)
 
-    print(blocks_data)
-    for block_data in blocks_data:
-        create_mesh("BLOCK", block_data)
+        create_mesh("PLANE")
 
-    setup_camera()
-    setup_light()
+        print(blocks_data)
+        for block_data in blocks_data:
+            create_mesh("BLOCK", block_data)
 
-    # no_physics_render(i, config_num_colors)
-    physics_render(0, ped_num, config)
+        setup_camera()
+        setup_light()
 
-    # p = simple_render()
-    # print(p.shape)
+        # no_physics_render(i, config_num_colors)
+        physics_render(i, ped_num, config)
+
+        p = simple_render()
+        
+        predictor = CollapsePredictor()
+
+        print("predict ",predictor.predict(p))
+        clear_scene()
 
 
 if __name__ == "__main__":

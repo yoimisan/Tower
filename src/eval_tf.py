@@ -5,6 +5,10 @@ import torch
 from torch.utils.data import DataLoader
 from torchvision.utils import make_grid, save_image
 
+import sys
+import os
+sys.path.append(os.path.dirname(__file__)) 
+
 from predict_tf import (
     TrainConfig,
     TowerCollapseDataset,
@@ -85,23 +89,42 @@ def visualize_predictions(
             saved += 1
 
 
+@torch.no_grad()
+def eval_one_img(model, loader, cfg: TrainConfig):
+    model.eval()
+    total_loss = 0.0
+    total_vid = 0.0
+    correct = 0
+    n = 0
+
+    for x0, _, _ in loader:
+        print(x0.shape)
+        x0 = x0.to(cfg.device)
+        
+
+        _, logit = model(x0)
+        print(logit)
+        break
+        
+
 def main():
     args = parse_args()
     cfg = TrainConfig()
 
     ds = TowerCollapseDataset(root_dir=str(args.data_root), image_size=cfg.image_size)
-    cfg.T = ds.T
+    cfg.T = 22
 
     loader = DataLoader(
         ds, batch_size=cfg.batch_size, shuffle=False, num_workers=2, pin_memory=True
     )
 
     model = load_model(cfg, args.model_path, T=cfg.T)
-    val_loss, mae, acc = eval_one_epoch(model, loader, cfg)
-    print(f"Eval | loss={val_loss:.4f} | mae={mae:.6f} | acc={acc:.3f}")
+    eval_one_img(model,loader,cfg)
+    # val_loss, mae, acc = eval_one_epoch(model, loader, cfg)
+    # print(f"Eval | loss={val_loss:.4f} | mae={mae:.6f} | acc={acc:.3f}")
 
-    visualize_predictions(model, loader, cfg, args.output_dir, max_samples=args.max_samples)
-    print(f"Saved prediction grids to {args.output_dir}")
+    # visualize_predictions(model, loader, cfg, args.output_dir, max_samples=args.max_samples)
+    # print(f"Saved prediction grids to {args.output_dir}")
 
 
 if __name__ == "__main__":

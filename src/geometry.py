@@ -120,8 +120,8 @@ class Heightmap:
                 # 底座方块：在原点附近的更小矩形区域均匀采样，使底座更“集中”
                 # 原来范围较大：x ∈ [-1.5, 1.5], y ∈ [-0.75, 0.75]
                 # 这里收缩到更小的区域（如果需要再更集中，可以继续缩小这个范围）
-                x = np.random.uniform(-0.6, 0.6)
-                y = np.random.uniform(-0.4, 0.4)
+                x = np.random.uniform(-0.8, 0.8)
+                y = np.random.uniform(-0.6, 0.6)
                 z = 0.75
                 position = (x, y, z)
                 new_polygon = self.get_polygon(position, size, rotation)

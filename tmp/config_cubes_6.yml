@@ -16,9 +16,9 @@ General:
   ROT_DISCRETE: false
   OUTPUT_PATH: D:\workspace\python-workspace\Tower\output\cubes_6
   RENDER_VIDEO: false
-  SAVE_ALL_FRAMES_IMAGES: true
-  SAVE_LAST_FRAME_IMAGE: false
-  SAVE_FIRST_FRAME_IMAGE: false
+  SAVE_ALL_FRAMES_IMAGES: false
+  SAVE_LAST_FRAME_IMAGE: true
+  SAVE_FIRST_FRAME_IMAGE: true
   STACK_ON_EXISTING_PROB: 0.5
 Scene:
   num_blocks: 6
