@@ -2,7 +2,6 @@
 # PyTorch >= 2.0, torchvision >= 0.15
 
 import math
-import os
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +15,8 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from torchvision.models import resnet18
 from PIL import Image
+from tqdm import tqdm
+import torchvision
 
 plt.switch_backend("Agg")
 
@@ -46,26 +47,16 @@ class SinusoidalPosEmb(nn.Module):
             emb = F.pad(emb, (0, 1))
         return emb
 
-
-# -------------------------
-# Dataset (replace with yours)
-# -------------------------
 class TowerCollapseDataset(Dataset):
     """
-    Expected per sample:
-      - x0: initial frame, torch.FloatTensor [3, H, W] in [0,1]
-      - y_seq: future frames, torch.FloatTensor [T, 3, H, W] in [0,1]
-      - y_collapse: torch.FloatTensor scalar (0/1)
+    Preload version: 所有图片在 __init__ 中一次性读入内存
+    每个样本返回：
+      - x0: [3, H, W]
+      - y_seq: [T, 3, H, W]
+      - y_collapse: scalar (0/1)
     """
 
     def __init__(self, root_dir: str, image_size: int = 128):
-        """
-        root_dir: 形如 'output' 的目录，内部为 Blender 渲染生成的数据：
-          - output/cubes_4/0/...
-          - output/cubes_4/1/...
-          - output/cubes_5/0/...
-          - ...
-        """
         self.root_dir = Path(root_dir)
         if not self.root_dir.exists():
             raise FileNotFoundError(f"数据根目录不存在: {self.root_dir}")
@@ -79,73 +70,74 @@ class TowerCollapseDataset(Dataset):
             ]
         )
 
-        # 收集所有样本：(frame_paths_list, collapse_label)
+        # ---------------------------------
+        # Step 1: 收集所有样本路径和标签
+        # ---------------------------------
         raw_samples: List[Tuple[List[Path], float]] = []
 
-        # for cubes_dir in sorted(self.root_dir.glob("cubes_*")):
-        #     if not cubes_dir.is_dir():
-        #         continue
         for scene_dir in sorted(self.root_dir.iterdir()):
-            print(scene_dir)
             if not scene_dir.is_dir():
                 continue
-            print(2)
+
             meta_path = scene_dir / "meta.json"
             if not meta_path.exists():
                 continue
-            print(3)
-            # 读取标签：collapse_state -> 0/1
+
             with open(meta_path, "r", encoding="utf-8") as f:
                 meta = json.load(f)
             collapse_state = meta.get("collapse_state", "stable")
             y_c = 1.0 if collapse_state == "collapsed" else 0.0
 
             frame_paths = sorted(scene_dir.glob("frame_*.png"))
-            # 至少需要 2 帧（1 帧做输入，剩余做预测目标）
             if len(frame_paths) < 2:
                 continue
-            print(4)
+
             raw_samples.append((frame_paths, y_c))
 
         if not raw_samples:
-            raise RuntimeError(
-                f"在 {self.root_dir} 下未找到任何有效样本（包含 meta.json 与 frame_*.png）"
-            )
+            raise RuntimeError(f"在 {self.root_dir} 下未找到任何有效样本")
 
-        # 为了保证所有样本长度一致，取所有场景中最短的帧数
-        min_frames = min(len(frames) for frames, _ in raw_samples)
+        # ---------------------------------
+        # Step 2: 统一时间长度
+        # ---------------------------------
+        min_frames = 2 #min(len(frames) for frames, _ in raw_samples)
         if min_frames < 2:
             raise RuntimeError("所有样本帧数都小于 2，无法构建时间序列数据")
 
-        # 使用统一长度：total_frames，模型的 T = total_frames - 1
         self.total_frames = min_frames
         self.T = self.total_frames - 1
 
-        self.samples: List[Tuple[List[Path], float]] = []
-        for frames, y_c in raw_samples:
-            self.samples.append((frames[: self.total_frames], y_c))
+        # ---------------------------------
+        # Step 3: 预加载所有图片
+        # ---------------------------------
+        self.data = []  # [(x0, y_seq, y_collapse), ...]
+
+        print(f"[Dataset] Preloading {len(raw_samples)} samples into memory...")
+
+        for frame_paths, y_c in tqdm(raw_samples):
+            frame_paths = frame_paths[: self.total_frames]
+
+            frames = []
+            for p in frame_paths:
+                with Image.open(p) as img:
+                    img = img.convert("RGB")
+                    frames.append(self.tf(img))
+
+            frames_tensor = torch.stack(frames, dim=0)  # [total_frames, 3, H, W]
+
+            x0 = frames_tensor[0]          # [3, H, W]
+            y_seq = frames_tensor[1:]     # [T, 3, H, W]
+            y_collapse = torch.tensor(float(y_c), dtype=torch.float32)
+
+            self.data.append((x0, y_seq, y_collapse))
+
+        print(f"[Dataset] Done. Total frames per sample = {self.total_frames}")
 
     def __len__(self):
-        return len(self.samples)
+        return len(self.data)
 
     def __getitem__(self, idx):
-        frame_paths, y_c = self.samples[idx]
-
-        frames = []
-        for p in frame_paths:
-            with Image.open(p) as img:
-                img = img.convert("RGB")
-                frames.append(self.tf(img))
-
-        # [total_frames, 3, H, W]
-        frames_tensor = torch.stack(frames, dim=0)
-
-        # 第 0 帧作为条件输入 x0，后面的作为预测目标序列
-        x0 = frames_tensor[0]  # [3, H, W]
-        y_seq = frames_tensor[1:]  # [T, 3, H, W]，其中 T = total_frames - 1
-
-        y_collapse = torch.tensor(float(y_c), dtype=torch.float32)
-        return x0, y_seq, y_collapse
+        return self.data[idx]
 
 
 # -------------------------
@@ -337,47 +329,176 @@ class TemporalTransformerPredictor(nn.Module):
         return pred_seq, collapse_logit
 
 
+class TemporalDiscriminator(nn.Module):
+    """Patch-based discriminator operating on concatenated temporal frames."""
+
+    def __init__(self, in_channels: int, base_channels: int = 64, n_layers: int = 4):
+        super().__init__()
+        layers = []
+        channels = base_channels
+        layers.append(nn.Conv2d(in_channels, channels, kernel_size=4, stride=2, padding=1))
+        layers.append(nn.LeakyReLU(0.2, inplace=True))
+
+        for i in range(1, n_layers):
+            in_ch = channels
+            out_ch = min(base_channels * (2 ** i), 512)
+            stride = 2 if i < n_layers - 1 else 1
+            layers.append(nn.Conv2d(in_ch, out_ch, kernel_size=4, stride=stride, padding=1))
+            layers.append(nn.InstanceNorm2d(out_ch))
+            layers.append(nn.LeakyReLU(0.2, inplace=True))
+            channels = out_ch
+
+        self.features = nn.Sequential(*layers)
+        self.final = nn.Conv2d(channels, 1, kernel_size=4, padding=1)
+
+    def forward(self, frames: torch.Tensor) -> torch.Tensor:
+        x = self.features(frames)
+        x = self.final(x)
+        return x.mean(dim=(1, 2, 3))
+
+
 # -------------------------
 # Train / Eval
 # -------------------------
 @dataclass
 class TrainConfig:
-    image_size: int = 128
+    image_size: int = 256
     T: int = 10  # 将在构建数据集后，根据实际帧数自动覆盖
-    batch_size: int = 8
-    lr: float = 3e-4
-    epochs: int = 10
+    batch_size: int = 32
+    lr: float = 1e-5
+    epochs: int = 50
     lambda_cls: float = 0.5
+    lambda_adv: float = 0.1
+    grad_clip: float = 1.0
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
+def _concat_temporal_frames(x0: torch.Tensor, seq: torch.Tensor) -> torch.Tensor:
+    frames = torch.cat([x0.unsqueeze(1), seq], dim=1)
+    B, steps, C, H, W = frames.shape
+    return frames.reshape(B, steps * C, H, W)
 
-def train_one_epoch(model, loader, opt, cfg: TrainConfig):
+def compute_foreground_mask(img, thresh=5):
+    """
+    img: [B, T, 3, H, W] in [0,1]
+    returns: [B, T, 1, H, W] binary mask
+    """
+    # 灰色背景: R≈G≈B
+    r, g, b = img[:, :, 0], img[:, :, 1], img[:, :, 2]
+    diff = (r - g).abs() + (r - b).abs() + (g - b).abs()
+    mask = (diff > thresh).float()
+    return mask.unsqueeze(2)
+
+
+class VGGPerceptualLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        vgg = torchvision.models.vgg11(weights="IMAGENET1K_V1").features
+
+        # 取前 3 个 block（共 8 个 conv）
+        self.blocks = nn.ModuleList([
+            vgg[:4],    # conv1_1, relu, conv1_2, relu
+            vgg[4:9],   # maxpool + conv2_1, relu, conv2_2, relu
+            vgg[9:16],  # maxpool + conv3_1, relu, conv3_2, relu
+        ])
+
+        for b in self.blocks:
+            b.eval()
+            for p in b.parameters():
+                p.requires_grad = False
+
+        self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1,3,1,1))
+        self.register_buffer("std",  torch.tensor([0.229, 0.224, 0.225]).view(1,3,1,1))
+
+    def forward(self, x, y):
+        """
+        x, y: [B,3,H,W] in [0,1]
+        """
+        x = (x - self.mean) / self.std
+        y = (y - self.mean) / self.std
+
+        loss = 0.0
+        for block in self.blocks:
+            x = block(x)
+            y = block(y)
+            loss += F.l1_loss(x, y)
+
+        return loss
+
+
+def train_one_epoch_gan(
+    model: TemporalTransformerPredictor,
+    discriminator: TemporalDiscriminator,
+    loader: DataLoader,
+    opt_g: torch.optim.Optimizer,
+    opt_d: torch.optim.Optimizer,
+    cfg: TrainConfig,
+):
     model.train()
-    total_loss = 0.0
+    discriminator.train()
+    total_g = 0.0
+    total_d = 0.0
+    perceptual = VGGPerceptualLoss().to(cfg.device)
+
 
     for x0, y_seq, y_c in loader:
         x0 = x0.to(cfg.device)
         y_seq = y_seq.to(cfg.device)
         y_c = y_c.to(cfg.device)
 
+        real_video = _concat_temporal_frames(x0, y_seq)
+
+        # Update discriminator
+        opt_d.zero_grad(set_to_none=True)
+        with torch.no_grad():
+            fake_seq_detached, _ = model(x0)
+        fake_video = _concat_temporal_frames(x0, fake_seq_detached)
+        real_score = discriminator(real_video)
+        fake_score = discriminator(fake_video)
+        loss_d_real = F.relu(1 - real_score).mean()
+        loss_d_fake = F.relu(1 + fake_score).mean()
+        loss_d = loss_d_real + loss_d_fake
+        loss_d.backward()
+        nn.utils.clip_grad_norm_(discriminator.parameters(), cfg.grad_clip)
+        opt_d.step()
+
+        # Update generator
+        opt_g.zero_grad(set_to_none=True)
         pred_seq, logit = model(x0)
+        fake_video_for_g = _concat_temporal_frames(x0, pred_seq)
+        adv_score = discriminator(fake_video_for_g)
+        
+        loss_perc = 0.0
+        for t in range(pred_seq.size(1)):
+            loss_perc += perceptual(pred_seq[:,t], y_seq[:,t])
+        loss_perc /= pred_seq.size(1)
 
-        # video prediction loss
-        loss_vid = F.l1_loss(pred_seq, y_seq)
+        mask = compute_foreground_mask(y_seq)
+        loss_l1 = (F.l1_loss(pred_seq, y_seq, reduction='none') * mask).mean()
+        # import ipdb; ipdb.set_trace()
 
-        # collapse classification loss
+        # loss_l1 = F.l1_loss(pred_seq, y_seq)
+        loss_adv = -adv_score.mean()
         loss_cls = F.binary_cross_entropy_with_logits(logit, y_c)
+        
+        # loss_g = loss_l1 + cfg.lambda_adv * loss_adv + cfg.lambda_cls * loss_cls
+        loss_g = (
+            1.0 * loss_l1 +
+            0.2 * loss_perc +
+            0.1 * loss_adv +
+            0.5 * loss_cls
+        )
+        
+        
+        loss_g.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
+        opt_g.step()
 
-        loss = loss_vid + cfg.lambda_cls * loss_cls
+        total_g += loss_g.item() * x0.size(0)
+        total_d += loss_d.item() * x0.size(0)
 
-        opt.zero_grad(set_to_none=True)
-        loss.backward()
-        nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        opt.step()
-
-        total_loss += loss.item() * x0.size(0)
-
-    return total_loss / len(loader.dataset)
+    denom = len(loader.dataset)
+    return total_g / denom, total_d / denom
 
 
 @torch.no_grad()
@@ -402,7 +523,6 @@ def eval_one_epoch(model, loader, cfg: TrainConfig):
         total_vid += F.l1_loss(pred_seq, y_seq, reduction="sum").item()
 
         prob = torch.sigmoid(logit)
-        print("logit ",logit)
         pred = (prob >= 0.5).float()
         correct += (pred == y_c).sum().item()
         n += x0.size(0)
@@ -455,7 +575,7 @@ def main():
     ds = TowerCollapseDataset(root_dir=str(data_root), image_size=cfg.image_size)
 
     # 根据数据集的总帧数自动设置时间步数 T（未来帧数）
-    cfg.T = ds.T
+    cfg.T = 1#ds.T
 
     # 按 8:2 划分训练 / 验证集
     n_total = len(ds)
@@ -487,7 +607,10 @@ def main():
         T=cfg.T,
     ).to(cfg.device)
 
-    opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=1e-2)
+    discriminator = TemporalDiscriminator(in_channels=3 * (cfg.T + 1)).to(cfg.device)
+
+    opt_g = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=1e-2)
+    opt_d = torch.optim.AdamW(discriminator.parameters(), lr=cfg.lr, weight_decay=1e-2)
 
     train_losses = []
     val_losses = []
@@ -495,22 +618,24 @@ def main():
     val_accs = []
 
     for epoch in range(1, cfg.epochs + 1):
-        loss = train_one_epoch(model, train_loader, opt, cfg)
+        train_g_loss, train_d_loss = train_one_epoch_gan(
+            model, discriminator, train_loader, opt_g, opt_d, cfg
+        )
         val_loss, mae, acc = eval_one_epoch(model, val_loader, cfg)
-        train_losses.append(loss)
+        train_losses.append(train_g_loss)
         val_losses.append(val_loss)
         val_maes.append(mae)
         val_accs.append(acc)
         print(
-            f"Epoch {epoch:02d} | train_loss={loss:.4f} | val_loss={val_loss:.4f} | "
-            f"val_mae={mae:.6f} | val_acc={acc:.3f}"
+            f"Epoch {epoch:02d} | train_G={train_g_loss:.4f} | train_D={train_d_loss:.4f} | "
+            f"val_loss={val_loss:.4f} | val_mae={mae:.6f} | val_acc={acc:.3f}"
         )
 
-    curve_path = project_root / "tf_training_curves.png"
+    curve_path = project_root / "tf_training_curves2.png"
     plot_curves(train_losses, val_losses, val_maes, val_accs, curve_path)
     print(f"Saved: {curve_path}")
 
-    model_path = project_root / "model_a.pt"
+    model_path = project_root / "model_b.pt"
     torch.save(model.state_dict(), model_path)
     print(f"Saved: {model_path}")
 
