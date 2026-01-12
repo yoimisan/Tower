@@ -1,11 +1,12 @@
 import argparse
 import json
 import os
+from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 import torch
 from torch import nn
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, random_split
 from torchvision import models, transforms
 from torchvision.io import read_image
 
@@ -132,23 +133,23 @@ def evaluate(model: nn.Module, dataloader: DataLoader, device: torch.device) -> 
         total += labels.size(0)
 
     accuracy = 100.0 * correct / max(total, 1)
-    print(f"Training set accuracy: {accuracy:.2f}%")
+    print(f"Test set accuracy: {accuracy:.2f}%")
     return accuracy
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train tower collapse CNN baseline.")
     parser.add_argument(
-        "--train-data-root",
+        "--data-root",
         type=str,
-        default="data/cubes_4",
-        help="Path to dataset root directory.",
+        default="all_data",
+        help="Path to dataset root directory. 4/5 of the data is used for training, 1/5 for testing.",
     )
     parser.add_argument(
-        "--test-data-root",
-        type=str,
-        default="data/cubes_4",
-        help="Path to dataset root directory.",
+        "--split-seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducible train/test split.",
     )
     parser.add_argument(
         "--epochs",
@@ -162,14 +163,38 @@ def main() -> None:
         default=0,
         help="Number of DataLoader worker processes.",
     )
+    parser.add_argument(
+        "--batch",
+        type=int,
+        default=16,
+        help="batch size",
+    )
+    parser.add_argument(
+        "--output-path",
+        type=str,
+        default="model_cnn.pt",
+        help="Where to save the trained model weights (state_dict).",
+    )
     args = parser.parse_args()
 
-    device = torch.device("cpu") #torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_dataset = TowerDataset(args.train_data_root)
-    test_dataset = TowerDataset(args.test_data_root)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(device)
+    full_dataset = TowerDataset(args.data_root)
+    print("data get ready")
+    test_size = max(1, len(full_dataset) // 5)
+    train_size = len(full_dataset) - test_size
+    if train_size <= 0:
+        raise ValueError(
+            "Not enough data to create a training split. Provide at least 2 samples."
+        )
+
+    generator = torch.Generator().manual_seed(args.split_seed)
+    train_dataset, test_dataset = random_split(
+        full_dataset, [train_size, test_size], generator=generator
+    )
     train_dataloader = DataLoader(
         train_dataset,
-        batch_size=16,
+        batch_size=args.batch,
         shuffle=True,
         num_workers=args.num_workers,
         pin_memory=device.type == "cuda",
@@ -177,8 +202,8 @@ def main() -> None:
 
     test_dataloader = DataLoader(
         test_dataset,
-        batch_size=16,
-        shuffle=True,
+        batch_size=args.batch,
+        shuffle=False,
         num_workers=args.num_workers,
         pin_memory=device.type == "cuda",
     )
@@ -189,6 +214,11 @@ def main() -> None:
 
     train(model, train_dataloader, criterion, optimizer, device, args.epochs)
     evaluate(model, test_dataloader, device)
+
+    output_path = Path(args.output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(model.state_dict(), output_path)
+    print(f"Saved trained weights to {output_path}")
 
 
 if __name__ == "__main__":
